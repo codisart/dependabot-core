@@ -1,4 +1,6 @@
-[dependency_name] = System.argv()
+[dependency_name, credentials] = System.argv()
+
+# TODO: Loop through credentials here
 
 # dependency atom
 dependency = String.to_atom(dependency_name)
