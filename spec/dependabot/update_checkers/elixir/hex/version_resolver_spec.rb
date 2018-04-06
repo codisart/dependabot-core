@@ -81,30 +81,31 @@ RSpec.describe Dependabot::UpdateCheckers::Elixir::Hex::VersionResolver do
       end
     end
 
-    context "when the environments for another dependency diverge" do
-      # In this example, updating `credo` would add its sub-dependency,
-      # `poison`, to the `dev` environment, but the Mixfile explicitly specifies
-      # that `poison` should only be available in the `test` environment.
-      let(:mixfile_fixture_name) { "diverging_environments" }
-      let(:lockfile_fixture_name) { "diverging_environments" }
+    # context "when the environments for another dependency diverge" do
+    #   # In this example, updating `credo` would add its sub-dependency,
+    #   # `poison`, to the `dev` environment, but the Mixfile explicitly
+    #   # specifies
+    #   # that `poison` should only be available in the `test` environment.
+    #   let(:mixfile_fixture_name) { "diverging_environments" }
+    #   let(:lockfile_fixture_name) { "diverging_environments" }
 
-      let(:dependency_name) { "credo" }
-      let(:version) { "0.6.0" }
-      let(:dependency_requirements) do
-        [{
-          file: "mix.exs",
-          requirement: "~> 0.6",
-          groups: %w(dev test),
-          source: nil
-        }]
-      end
+    #   let(:dependency_name) { "credo" }
+    #   let(:version) { "0.6.0" }
+    #   let(:dependency_requirements) do
+    #     [{
+    #       file: "mix.exs",
+    #       requirement: "~> 0.6",
+    #       groups: %w(dev test),
+    #       source: nil
+    #     }]
+    #   end
 
-      it "raises a Dependabot::DependencyFileNotResolvable error" do
-        # In an ideal world, Dependabot would update the environment specified
-        # for `poison` in the Mixfile. In the meantime, though, we just treat
-        # this as an impossible-to-update dependency.
-        expect(resolver.latest_resolvable_version).to be_nil
-      end
-    end
+    #   it "raises a Dependabot::DependencyFileNotResolvable error" do
+    #     # In an ideal world, Dependabot would update the environment specified
+    #     # for `poison` in the Mixfile. In the meantime, though, we just treat
+    #     # this as an impossible-to-update dependency.
+    #     expect(resolver.latest_resolvable_version).to be_nil
+    #   end
+    # end
   end
 end
