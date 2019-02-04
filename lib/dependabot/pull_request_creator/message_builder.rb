@@ -31,6 +31,9 @@ module Dependabot
         /(?<=[\s(\\]|^)(?<tag>(?:\#|GH-)\d+)(?=[^A-Za-z0-9\-]|$)/.freeze
       GITHUB_REF_REGEX = %r{github\.com/[^/\s]+/[^/\s]+/(?:issue|pull)}.freeze
 
+      GitlabClient = Dependabot::Clients::Gitlab
+      GithubWithRetries = Dependabot::Clients::GithubWithRetries
+
       attr_reader :source, :dependencies, :files, :credentials,
                   :pr_message_footer, :author_details, :vulnerabilities_fixed
 
@@ -877,18 +880,18 @@ module Dependabot
       end
 
       def github_client_for_source
-        @github_client_for_source ||=
-          Dependabot::Clients::GithubWithRetries.for_source(
-            source: source,
-            credentials: credentials
-          )
+        @github_client_for_source ||= build_client(GithubWithRetries)
       end
 
       def gitlab_client_for_source
-        @gitlab_client_for_source ||= Dependabot::Clients::Gitlab.for_source(
-          source: source,
-          credentials: credentials
-        )
+        @gitlab_client_for_source ||= build_client(GitlabClient)
+      end
+
+      def build_client
+          client_class.for_source(
+              source: source,
+              credentials: credentials
+          )
       end
 
       def package_manager

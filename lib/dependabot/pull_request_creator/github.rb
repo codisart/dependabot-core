@@ -14,6 +14,8 @@ module Dependabot
                   :author_details, :signature_key,
                   :labeler, :reviewers, :assignees, :milestone
 
+      GithubWithRetries = Dependabot::Clients::GithubWithRetries
+
       def initialize(source:, branch_name:, base_commit:, credentials:,
                      files:, commit_message:, pr_description:, pr_name:,
                      author_details:, signature_key:,
@@ -32,6 +34,13 @@ module Dependabot
         @reviewers      = reviewers
         @assignees      = assignees
         @milestone      = milestone
+
+        @repository = source.repo
+
+        @github_client_for_source = GithubWithRetries.for_source(
+            source: source,
+            credentials: credentials
+          )
       end
 
       def create
@@ -52,14 +61,6 @@ module Dependabot
       end
 
       private
-
-      def github_client_for_source
-        @github_client_for_source ||=
-          Dependabot::Clients::GithubWithRetries.for_source(
-            source: source,
-            credentials: credentials
-          )
-      end
 
       def branch_exists?
         @branch_ref ||=

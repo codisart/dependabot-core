@@ -14,6 +14,12 @@ module Dependabot
       # Constructor methods #
       #######################
 
+      # TODO: When self-hosted Bitbucket is supported this should use
+      # the source param
+      def self.for_source(source:, credentials:)
+        for_bitbucket_dot_org(credentials)
+      end
+
       def self.for_bitbucket_dot_org(credentials:)
         credential =
           credentials.
@@ -54,6 +60,27 @@ module Dependabot
         response = get(base_url + api_path)
 
         JSON.parse(response.body).fetch("values")
+      end
+
+      def get_repo_contents(repo, commit, path)
+        response = fetch_repo_contents(repo, commit, path)
+
+        response.map do |file|
+          OpenStruct.new(
+            name: File.basename(file.fetch("path")),
+            path: file.fetch("path"),
+            type: type_of(file),
+            size: file.fetch("size", 0)
+          )
+        end
+      end
+
+      def type_of(file)
+          case file.fetch("type")
+             when "commit_file" then "file"
+             when "commit_directory" then "dir"
+             else file.fetch("type")
+         end
       end
 
       def fetch_file_contents(repo, commit, path)

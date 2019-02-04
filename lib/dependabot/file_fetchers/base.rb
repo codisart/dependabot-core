@@ -5,6 +5,7 @@ require "dependabot/source"
 require "dependabot/errors"
 require "dependabot/clients/github_with_retries"
 require "dependabot/clients/bitbucket"
+require "dependabot/clients/factory"
 require "dependabot/clients/gitlab"
 require "dependabot/shared_helpers"
 
@@ -12,6 +13,8 @@ module Dependabot
   module FileFetchers
     class Base
       attr_reader :source, :credentials
+
+      ClientFactory = Dependabot::Clients::Factory
 
       def self.required_files_in?(_filename_array)
         raise NotImplementedError
@@ -56,18 +59,6 @@ module Dependabot
       end
 
       private
-
-      def client_for_provider
-        case source.provider
-        when "github"
-          github_client_for_source
-        when "gitlab"
-          gitlab_client
-        when "bitbucket"
-          bitbucket_client
-        else raise "Unsupported provider '#{source.provider}'."
-        end
-      end
 
       def default_branch_for_repo
         @default_branch_for_repo ||=
@@ -128,9 +119,12 @@ module Dependabot
         @repo_contents ||= {}
         @repo_contents[dir] ||=
           case source.provider
-          when "github" then github_repo_contents(path)
-          when "gitlab" then gitlab_repo_contents(path)
-          when "bitbucket" then bitbucket_repo_contents(path)
+          when "github"
+              github_repo_contents(path)
+          when "gitlab"
+            client_for_provider.get_repo_contents(repo, commit, path)
+          when "bitbucket"
+            client_for_provider.get_repo_contents(repo, commit, path)
           else raise "Unsupported provider '#{source.provider}'."
           end
       rescue Octokit::NotFound, Gitlab::Error::NotFound,
@@ -142,33 +136,32 @@ module Dependabot
 
       def github_repo_contents(path)
         path = path.gsub(" ", "%20")
-        github_response = github_client_for_source.
+        response = client_for_provider.
                           contents(repo, path: path, ref: commit)
 
-        if github_response.respond_to?(:type) &&
-           github_response.type == "submodule"
-          @submodule_directories[path] = github_response
+        if response.respond_to?(:type) && response.type == "submodule"
+          @submodule_directories[path] = response
 
-          sub_source = Source.from_url(github_response.submodule_git_url)
-          github_response = github_client_for_source.
-                            contents(sub_source.repo, ref: github_response.sha)
-        elsif github_response.respond_to?(:type)
+          sub_source = Source.from_url(response.submodule_git_url)
+          response = client_for_provider.
+                            contents(sub_source.repo, ref: response.sha)
+        elsif response.respond_to?(:type)
           raise Octokit::NotFound
         end
 
-        github_response.map do |f|
+        response.map do |file|
           OpenStruct.new(
-            name: f.name,
-            path: f.path,
-            type: f.type,
-            sha: f.sha,
-            size: f.size
+            name: file.name,
+            path: file.path,
+            type: file.type,
+            sha: file.sha,
+            size: file.size
           )
         end
       end
 
       def gitlab_repo_contents(path)
-        gitlab_client.
+        client_for_provider.
           repo_tree(repo, path: path, ref_name: commit, per_page: 100).
           map do |file|
             OpenStruct.new(
@@ -177,30 +170,8 @@ module Dependabot
               type: file.type == "blob" ? "file" : file.type,
               size: 0 # GitLab doesn't return file size
             )
+
           end
-      end
-
-      def bitbucket_repo_contents(path)
-        response = bitbucket_client.fetch_repo_contents(
-          repo,
-          commit,
-          path
-        )
-
-        response.map do |file|
-          type = case file.fetch("type")
-                 when "commit_file" then "file"
-                 when "commit_directory" then "dir"
-                 else file.fetch("type")
-                 end
-
-          OpenStruct.new(
-            name: File.basename(file.fetch("path")),
-            path: file.fetch("path"),
-            type: type,
-            size: file.fetch("size", 0)
-          )
-        end
       end
 
       def fetch_file_content(path)
@@ -211,16 +182,7 @@ module Dependabot
           return fetch_submodule_file_content(path)
         end
 
-        case source.provider
-        when "github"
-          fetch_file_content_from_github(path, repo, commit)
-        when "gitlab"
-          tmp = gitlab_client.get_file(repo, path, commit).content
-          Base64.decode64(tmp).force_encoding("UTF-8").encode
-        when "bitbucket"
-          bitbucket_client.fetch_file_contents(repo, commit, path)
-        else raise "Unsupported provider '#{source.provider}'."
-        end
+        fetch_file_content(source.provider, path, repo, commit)
       end
 
       def fetch_submodule_file_content(path)
@@ -233,24 +195,28 @@ module Dependabot
         commit = submodule.sha
         path = path.gsub("#{dir}/", "")
 
+        fetch_file_content(provider, path, repo, commit)
+      end
+
+      def fetch_file_content_by_provider(provider, path, repo, commit)
         case provider
-        when "github"
-          fetch_file_content_from_github(path, repo, commit)
-        when "gitlab"
-          tmp = gitlab_client.get_file(repo, path, commit).content
-          Base64.decode64(tmp).force_encoding("UTF-8").encode
-        when "bitbucket"
-          bitbucket_client.fetch_file_contents(repo, commit, path)
-        else raise "Unsupported provider '#{provider}'."
+          when "github"
+            fetch_file_content_from_github(path, repo, commit)
+          when "gitlab"
+            tmp = client_for_provider.get_file(repo, path, commit).content
+            Base64.decode64(tmp).force_encoding("UTF-8").encode
+          when "bitbucket"
+            bitbucket_client.fetch_file_contents(repo, commit, path)
+          else raise "Unsupported provider '#{provider}'."
         end
       end
 
       # rubocop:disable Metrics/AbcSize
       def fetch_file_content_from_github(path, repo, commit)
-        tmp = github_client_for_source.contents(repo, path: path, ref: commit)
+        tmp = client_for_provider.contents(repo, path: path, ref: commit)
 
         if tmp.type == "symlink"
-          tmp = github_client_for_source.contents(
+          tmp = client_for_provider.contents(
             repo,
             path: tmp.target,
             ref: commit
@@ -268,36 +234,28 @@ module Dependabot
         file_details = repo_contents(dir: dir).find { |f| f.name == basename }
         raise unless file_details
 
-        tmp = github_client_for_source.blob(repo, file_details.sha)
+        tmp = client_for_provider.blob(repo, file_details.sha)
         return tmp.content if tmp.encoding == "utf-8"
 
         Base64.decode64(tmp.content).force_encoding("UTF-8").encode
       end
       # rubocop:enable Metrics/AbcSize
 
-      def github_client_for_source
-        @github_client_for_source ||=
-          Dependabot::Clients::GithubWithRetries.for_source(
-            source: source,
-            credentials: credentials
-          )
-      end
-
-      def gitlab_client
-        @gitlab_client ||=
-          Dependabot::Clients::Gitlab.for_source(
-            source: source,
-            credentials: credentials
-          )
+      def client_for_provider
+        @client_for_provider ||= build_client
       end
 
       def bitbucket_client
-        # TODO: When self-hosted Bitbucket is supported this should use
-        # `Bitbucket.for_source`
-        @bitbucket_client ||=
-          Dependabot::Clients::Bitbucket.
-          for_bitbucket_dot_org(credentials: credentials)
+        @bitbucket_client ||= build_client
       end
+
+      def build_client
+        ClientFactory.select_client(source.provider).for_source(
+          source: source,
+          credentials: credentials
+        )
+      end
+
     end
   end
 end

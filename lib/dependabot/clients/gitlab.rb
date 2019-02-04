@@ -1,37 +1,30 @@
 # frozen_string_literal: true
 
 require "gitlab"
+require "credentials/access_token"
 
 module Dependabot
   module Clients
     class Gitlab
+      AccessToken = Dependabot::Client::Credentials::AccessToken
+
       #######################
       # Constructor methods #
       #######################
 
       def self.for_source(source:, credentials:)
-        access_token =
-          credentials.
-          select { |cred| cred["type"] == "git_source" }.
-          find { |cred| cred["host"] == source.hostname }&.
-          fetch("password")
-
+        access_token = AccessToken.new(credentials, source.hostname).access_token
         new(
           endpoint: source.api_endpoint,
-          private_token: access_token || ""
+          private_token: access_token
         )
       end
 
       def self.for_gitlab_dot_com(credentials:)
-        access_token =
-          credentials.
-          select { |cred| cred["type"] == "git_source" }.
-          find { |cred| cred["host"] == "gitlab.com" }&.
-          fetch("password")
-
+        access_token = AccessToken.new(credentials, "gitlab.com").access_token
         new(
           endpoint: "https://gitlab.com/api/v4",
-          private_token: access_token || ""
+          private_token: access_token
         )
       end
 
@@ -47,6 +40,23 @@ module Dependabot
         project(repo).default_branch
       end
 
+      def get_repo_contents(repo, commit, path)
+        response = repo_tree(
+          repo,
+          path: path,
+          ref_name: commit,
+          per_page: 100
+        )
+
+        response.map do |file|
+          OpenStruct.new(
+            name: file.name,
+            path: file.path,
+            type: file.type == "blob" ? "file" : file.type,
+            size: 0 # GitLab doesn't return file size
+          )
+        end
+      end
       ############
       # Proxying #
       ############
